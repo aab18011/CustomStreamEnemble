@@ -9,10 +9,13 @@
 #include <errno.h>
 #include <stdbool.h>
 #include <sys/stat.h>
+#include <cjson/cJSON.h>
 #include "lan_check.h"
 #include "wlan_check.h"
 #include "check_dependencies.h"
 #include "python3_test.h"
+#include "config_handler.h"
+#include "obs_handler.h"
 
 // Macro to suppress unused parameter warnings
 #define UNUSED(x) (void)(x)
@@ -28,7 +31,37 @@ typedef enum {
 	INIT_FLAG_PYTHON_OK	= 1 << 5 	// Bit 5: Python3 installed and runnable
 } init_flag_t;
 
+typedef enum {
+	INIT_FINISHED = 1 << 0,		// Bit 0: Initialization finished
+	STREAM_READY = 1 << 1,		// Bit 1: Are we in full run mode (V4L2 ext mode + python +ffmpeg?)
+	OBS_SOCK_STREAM = 1 << 2,	// Bit 2: OBS websocket handler ready?
+	WEB_SOCK_STREAM = 1 << 3,	// Bit 3: HTML websocket handler ready?
+	CONFIG_HANDLER = 1 << 4,	// Bit 4: Configuration files handler ready? (This includes hot reload sub-handler)
+	LOGGING_DAEMON = 1 << 5,	// Bit 5: Logging system ready? (Includes: File I/O ready + Console I/O ready)
+	PRG_READY = 1 << 6,			// Bit 6: Is program safe to start?
+	SYSRUNNING = 1 << 7,			// Bit 7: Are we now running yet?
+	SYSERROR = 1 << 8				// Bit 8: Has an error been thrown?
+} pre_load_flag_t;
+
+typedef enum {
+	PRGRUNNING = 1 << 0,			// Bit 0: Are we running? (we keep a unique one for the while loop we are throwing ourselves into, so we can pass control back, if need be, to the pre_load system)
+	PRGERROR = 1 << 1,			// Bit 1: Any error detected (we will have an error buffer so we can set this to 1 whenever it is populated with n > 0 errors)
+	STOP_SIGNAL = 1 << 2 		// Bit 2: Have we received the stop signal (from the user of course). 
+} program_run_state_t;
+
 uint32_t init_state = 0; // Bitfield for initialization status
+
+int init_config_system() {
+	//The code is setup, and these are examples of totally fine code, but useless to me.
+	//I need to set this up to actually match my current setup.
+	//register_config("max_streams", &max_streams, CONFIG_INT);
+	//register_config("output_path", &output_path, CONFIG_STRING);
+	// Register more as needed
+
+	// Load configs from a fixed directory (create "configs/" with .json files like {"max_streams": 10, "output_path": "/path/to/output"})
+	//load_configs("configs/");
+	return 0; // if the init of the config system went okay; return 1 if the config files encountered an error but some loaded; 2 otherwise
+}
 
 /*
    HANDLE SHUTDOWN - Alert user of shutdown (or log it at least)
@@ -132,6 +165,8 @@ int main(int argc, char *argv[]) {
 		fprintf(stdout, "Python not available, skipping integration test.\n");
 	}
 
+
+	init_config_system();
 	// State Loop, we can set running to
 	// false when the inside of the loop
 	// has decided to finish
