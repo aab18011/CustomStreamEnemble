@@ -1,122 +1,153 @@
-# Makefile for Unified Streaming System
+# Makefile for ROC System Project
+# Targets:
+#   all: Build all executables
+#   clean: Remove build artifacts
+#   install: Install executables to /usr/local/bin (requires root)
+#   check-prereqs: Check for required libraries and tools
+
 CC = gcc
-CFLAGS = -Wall -Wextra -g -std=c99 -D_GNU_SOURCE -Iinclude
-LDFLAGS = -pthread -lssl -lcrypto -lcjson -luuid
+CFLAGS = -Wall -Wextra -std=c11 -O2 -Iinclude -D_POSIX_C_SOURCE=200809L
+LDFLAGS = -lpthread -lcjson
 
-# Directory structure (current flat layout)
-SRC_DIR = src
-INCLUDE_DIR = include
-OBJ_DIR = obj
-BIN_DIR = bin
-
-# Source files (all in src/)
-SOURCES = $(wildcard $(SRC_DIR)/*.c)
-
-# Object files 
-OBJECTS = $(SOURCES:$(SRC_DIR)/%.c=$(OBJ_DIR)/%.o)
-
-# Executable name
-EXEC = $(BIN_DIR)/streaming_system
-
-# Default target
-all: check_deps $(EXEC)
-
-# Check for required dependencies
-check_deps:
-	@echo "Checking dependencies..."
-	@command -v pkg-config >/dev/null 2>&1 || (echo "Error: pkg-config not found" && exit 1)
-	@pkg-config --exists openssl || (echo "Error: OpenSSL development libraries not found. Install libssl-dev" && exit 1)
-	@pkg-config --exists libcjson || (echo "Warning: libcjson not found via pkg-config, trying manual check...")
-	@test -f /usr/include/cjson/cJSON.h || test -f /usr/local/include/cjson/cJSON.h || (echo "Error: cJSON headers not found. Install libcjson-dev" && exit 1)
-	@pkg-config --exists uuid || test -f /usr/include/uuid/uuid.h || (echo "Error: UUID library not found. Install uuid-dev" && exit 1)
-	@echo "All dependencies found."
-
-# Link object files to create executable
-$(EXEC): $(OBJECTS) | $(BIN_DIR)
-	$(CC) $(OBJECTS) $(LDFLAGS) -o $@
-	@echo "Build complete: $@"
-
-# Compile source files to object files
-$(OBJ_DIR)/%.o: $(SRC_DIR)/%.c | $(OBJ_DIR)
-	$(CC) $(CFLAGS) -c $< -o $@
+SRCDIR = src
+INCDIR = include
+BINDIR = bin
+OBJDIR = obj
 
 # Create directories if they don't exist
-$(OBJ_DIR):
-	mkdir -p $(OBJ_DIR)
+$(shell mkdir -p $(BINDIR) $(OBJDIR))
 
-$(BIN_DIR):
-	mkdir -p $(BIN_DIR)
+# Common objects (shared libraries compiled from source)
+COMMON_OBJS = \
+	$(OBJDIR)/cJSON.o
 
-# Install system dependencies (Ubuntu/Debian)
-install_deps_ubuntu:
-	sudo apt-get update
-	sudo apt-get install -y libssl-dev libcjson-dev uuid-dev pkg-config
+# Main controller sources and objects
+MAIN_SRCS = \
+	$(SRCDIR)/main.c \
+	$(SRCDIR)/depcheck.c \
+	$(SRCDIR)/modulecheck.c \
+	$(SRCDIR)/lan_check.c \
+	$(SRCDIR)/wlan_check.c \
+	$(SRCDIR)/python3_test.c
 
-# Install system dependencies (CentOS/RHEL/Fedora)
-install_deps_redhat:
-	sudo yum install -y openssl-devel cjson-devel libuuid-devel pkgconfig
-	# Or for newer versions: sudo dnf install -y openssl-devel cjson-devel libuuid-devel pkgconfig
+MAIN_OBJS = $(MAIN_SRCS:$(SRCDIR)/%.c=$(OBJDIR)/%.o) $(COMMON_OBJS)
 
-# Development build with debug symbols and sanitizers
-debug: CFLAGS += -DDEBUG -fsanitize=address -fno-omit-frame-pointer
-debug: LDFLAGS += -fsanitize=address
-debug: $(EXEC)
+# Videopipe sources and objects
+VIDEOPIPE_SRCS = \
+	$(SRCDIR)/videopipe.c
 
-# Release build with optimizations
-release: CFLAGS += -O3 -DNDEBUG -flto
-release: LDFLAGS += -flto -s
-release: $(EXEC)
+VIDEOPIPE_OBJS = $(VIDEOPIPE_SRCS:$(SRCDIR)/%.c=$(OBJDIR)/%.o) $(COMMON_OBJS)
 
-# Test build (compiles but doesn't link - useful for syntax checking)
-test_compile: $(OBJECTS)
-	@echo "Compilation test passed"
+# V4L2 loopback installer sources and objects (no cJSON dependency)
+V4L2_SRCS = \
+	$(SRCDIR)/v4l2loopback_mod_install.c
 
-# Show what files will be compiled
-show_files:
-	@echo "=== Source Files ==="
-	@echo "$(SOURCES)"
-	@echo ""
-	@echo "=== Object Files ==="
-	@echo "$(OBJECTS)"
-	@echo ""
-	@echo "=== Executable ==="
-	@echo "$(EXEC)"
+V4L2_OBJS = $(V4L2_SRCS:$(SRCDIR)/%.c=$(OBJDIR)/%.o)
 
-# Clean up
+# Executables
+MAIN_EXEC = $(BINDIR)/main_controller
+VIDEOPIPE_EXEC = $(BINDIR)/videopipe
+V4L2_EXEC = $(BINDIR)/v4l2loopback_mod_install
+
+# Header dependencies
+HEADERS = $(wildcard $(INCDIR)/*.h)
+
+all: check-prereqs $(MAIN_EXEC) $(VIDEOPIPE_EXEC) $(V4L2_EXEC)
+
+# Prerequisite checking
+REQUIRED_TOOLS = gcc make
+REQUIRED_LIBS = libcjson-dev
+
+DISTRO = $(shell if [ -f /etc/debian_version ]; then echo "debian"; elif [ -f /etc/redhat-release ]; then echo "redhat"; elif [ -f /etc/arch-release ]; then echo "arch"; else echo "unknown"; fi)
+
+.PHONY: check-prereqs all clean install
+
+check-prereqs:
+	@echo "Checking prerequisites for compilation..."
+	@echo "Distribution: $(DISTRO)"
+	@echo "\nChecking required tools: $(REQUIRED_TOOLS)"
+	@for tool in $(REQUIRED_TOOLS); do \
+		if command -v $$tool >/dev/null 2>&1; then \
+			echo "$$tool: OK"; \
+		else \
+			echo "ERROR: $$tool not found. Install it using:"; \
+			if [ "$(DISTRO)" = "debian" ]; then \
+				echo "  sudo apt-get install $$tool"; \
+			elif [ "$(DISTRO)" = "redhat" ]; then \
+				echo "  sudo dnf install $$tool"; \
+			elif [ "$(DISTRO)" = "arch" ]; then \
+				echo "  sudo pacman -S $$tool"; \
+			else \
+				echo "  Install $$tool manually for your distribution"; \
+			fi; \
+			exit 1; \
+		fi; \
+	done
+	@echo "\nChecking required libraries: $(REQUIRED_LIBS)"
+	@if [ "$(DISTRO)" = "debian" ]; then \
+		for lib in $(REQUIRED_LIBS); do \
+			if dpkg -l | grep -q $$lib 2>/dev/null; then \
+				echo "$$lib: OK"; \
+			else \
+				echo "ERROR: $$lib not found. Install it using:"; \
+				echo "  sudo apt-get install $$lib"; \
+				exit 1; \
+			fi; \
+		done; \
+	elif [ "$(DISTRO)" = "redhat" ]; then \
+		for lib in $(REQUIRED_LIBS); do \
+			REDHAT_LIB=$$(echo $$lib | sed 's/libcjson-dev/libcjson/'); \
+			if rpm -q $$REDHAT_LIB >/dev/null 2>&1; then \
+				echo "$$lib: OK"; \
+			else \
+				echo "ERROR: $$lib not found. Install it using:"; \
+				echo "  sudo dnf install $$REDHAT_LIB"; \
+				exit 1; \
+			fi; \
+		done; \
+	elif [ "$(DISTRO)" = "arch" ]; then \
+		for lib in $(REQUIRED_LIBS); do \
+			ARCH_LIB=$$(echo $$lib | sed 's/libcjson-dev/cjson/'); \
+			if pacman -Q $$ARCH_LIB >/dev/null 2>&1; then \
+				echo "$$lib: OK"; \
+			else \
+				echo "ERROR: $$lib not found. Install it using:"; \
+				echo "  sudo pacman -S $$ARCH_LIB"; \
+				exit 1; \
+			fi; \
+		done; \
+	else \
+		echo "WARNING: Unknown distribution, cannot check libraries automatically."; \
+		echo "Please ensure libcjson (or equivalent) is installed."; \
+		exit 1; \
+	fi
+	@echo "\nAll prerequisites satisfied!"
+
+# Rule to compile .c to .o with header dependencies
+$(OBJDIR)/%.o: $(SRCDIR)/%.c $(HEADERS)
+	@echo "Compiling $<..."
+	$(CC) $(CFLAGS) -c $< -o $@ || { echo "Compilation failed for $<"; exit 1; }
+
+# Main controller executable
+$(MAIN_EXEC): $(MAIN_OBJS)
+	@echo "Linking $@..."
+	$(CC) $(CFLAGS) $^ -o $@ $(LDFLAGS) || { echo "Linking failed for $@"; exit 1; }
+
+# Videopipe executable
+$(VIDEOPIPE_EXEC): $(VIDEOPIPE_OBJS)
+	@echo "Linking $@..."
+	$(CC) $(CFLAGS) $^ -o $@ $(LDFLAGS) || { echo "Linking failed for $@"; exit 1; }
+
+# V4L2 loopback installer executable (no cJSON dependency)
+$(V4L2_EXEC): $(V4L2_OBJS)
+	@echo "Linking $@..."
+	$(CC) $(CFLAGS) $^ -o $@ -lpthread || { echo "Linking failed for $@"; exit 1; }
+
 clean:
-	rm -rf $(OBJ_DIR) $(BIN_DIR)
-	@echo "Clean complete"
+	rm -rf $(OBJDIR)/*.o $(BINDIR)/*
 
-# Clean and rebuild
-rebuild: clean all
-
-# Show current configuration
-show_config:
-	@echo "=== Build Configuration ==="
-	@echo "CC: $(CC)"
-	@echo "CFLAGS: $(CFLAGS)"
-	@echo "LDFLAGS: $(LDFLAGS)"
-	@echo "Source directory: $(SRC_DIR)"
-	@echo "Include directory: $(INCLUDE_DIR)"
-	@echo "Object directory: $(OBJ_DIR)"
-	@echo "Binary directory: $(BIN_DIR)"
-	@echo "Target: $(EXEC)"
-
-# Help target
-help:
-	@echo "Available targets:"
-	@echo "  all              - Build the complete system (default)"
-	@echo "  debug            - Build with debug flags and sanitizers"
-	@echo "  release          - Build optimized release version"
-	@echo "  test_compile     - Test compilation without linking"
-	@echo "  check_deps       - Check for required system dependencies"
-	@echo "  install_deps_ubuntu - Install dependencies on Ubuntu/Debian"
-	@echo "  install_deps_redhat - Install dependencies on CentOS/RHEL/Fedora"
-	@echo "  show_files       - Show source and object files"
-	@echo "  clean            - Remove built files"
-	@echo "  rebuild          - Clean and rebuild"
-	@echo "  show_config      - Display current build configuration"
-	@echo "  help             - Show this help message"
-
-# Phony targets
-.PHONY: all debug release test_compile check_deps install_deps_ubuntu install_deps_redhat show_files clean rebuild show_config help
+install:
+	@echo "Installing executables to /usr/local/bin..."
+	cp $(MAIN_EXEC) /usr/local/bin/ || { echo "Failed to install $(MAIN_EXEC)"; exit 1; }
+	cp $(VIDEOPIPE_EXEC) /usr/local/bin/ || { echo "Failed to install $(VIDEOPIPE_EXEC)"; exit 1; }
+	cp $(V4L2_EXEC) /usr/local/bin/ || { echo "Failed to install $(V4L2_EXEC)"; exit 1; }

@@ -75,7 +75,7 @@ static int parse_default_gateway(char *iface_out, size_t iflen,
     if (!fgets(line, sizeof(line), f)) { fclose(f); return -1; }
 
     while (fgets(line, sizeof(line), f)) {
-        char iface[IFNAMSIZ];
+        char iface[IF_NAMESIZE];
         char destination[32], gateway[32];
         if (sscanf(line, "%s %31s %31s", iface, destination, gateway) != 3)
             continue;

@@ -27,7 +27,7 @@
  *  - reachable:  Flag (1 = gateway reachable via TCP, 0 = not reachable).
  */
 typedef struct {
-    char ifname[IFNAMSIZ];
+    char ifname[IF_NAMESIZE];
     char gateway[INET_ADDRSTRLEN];
     char local_addr[INET_ADDRSTRLEN];
     int reachable;
